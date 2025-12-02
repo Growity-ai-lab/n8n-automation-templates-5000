@@ -1,0 +1,622 @@
+{
+  "name": "generate-social-from-blog-ai-enhanced",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "new-blog-post",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "📥 Webhook: New Blog Post",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [100, 400],
+      "webhookId": "blog-to-social-enhanced"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "⏰ Schedule: Check New Blogs",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [100, 600]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "sheetId": "{{ $env.GOOGLE_SHEET_ID }}",
+        "range": "BlogQueue!A2:F",
+        "options": {}
+      },
+      "id": "read-blog-queue",
+      "name": "📊 Read Blog Queue",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 3,
+      "position": [300, 600],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google_sheets_credential",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equals",
+              "value2": "pending"
+            }
+          ]
+        }
+      },
+      "id": "filter-pending",
+      "name": "🔍 Filter Pending Blogs",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [500, 600]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract blog content from webhook or Google Sheets\nconst items = [];\n\nfor (const item of $input.all()) {\n  let blogData;\n  \n  // Check if data comes from webhook\n  if (item.json.body) {\n    blogData = {\n      title: item.json.body.title || '',\n      content: item.json.body.content || '',\n      image_url: item.json.body.image_url || '',\n      blog_url: item.json.body.blog_url || '',\n      language: item.json.body.language || 'tr',\n      rowId: null\n    };\n  } \n  // Data from Google Sheets\n  else {\n    blogData = {\n      title: item.json['Blog Title'] || item.json.title || '',\n      content: item.json['Blog Content'] || item.json.content || '',\n      image_url: item.json['Image URL'] || item.json.image_url || '',\n      blog_url: item.json['Blog URL'] || item.json.blog_url || '',\n      language: item.json['Language'] || item.json.language || 'tr',\n      rowId: item.json.row_number || null\n    };\n  }\n  \n  // Validate required fields\n  if (blogData.title && blogData.content) {\n    items.push({ json: blogData });\n  }\n}\n\nreturn items;"
+      },
+      "id": "extract-blog-content",
+      "name": "⚙️ Extract & Validate Blog Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 500]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "create",
+        "modelId": "gpt-4",
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 2000
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Sen yaratıcı bir sosyal medya içerik uzmanısın. Blog yazılarından sosyal medya içerikleri oluşturuyorsun.\n\nGörevin:\n1. LinkedIn için profesyonel ve değer odaklı bir post (250-300 kelime)\n2. Instagram için ilgi çekici ve duygusal bir caption (150-200 kelime)\n3. Twitter/X için kısa ve etkili bir tweet (280 karakter max)\n\nHer platform için uygun ton ve stil kullan.\nEmoji kullanabilirsin ama abartma.\nCTA (Call-to-Action) ekle.\n\nCevabını şu JSON formatında ver:\n{\n  \"linkedin\": \"LinkedIn post içeriği\",\n  \"instagram\": \"Instagram caption\",\n  \"twitter\": \"Twitter tweet\"\n}"
+            },
+            {
+              "role": "user",
+              "content": "Dil: {{ $json.language }}\n\nBlog Başlığı: {{ $json.title }}\n\nBlog İçeriği:\n{{ $json.content }}\n\n{{ $json.blog_url ? 'Blog URL: ' + $json.blog_url : '' }}\n\nLütfen bu blog yazısından sosyal medya içerikleri oluştur."
+            }
+          ]
+        }
+      },
+      "id": "generate-social-content",
+      "name": "🤖 AI: Generate Social Content",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.3,
+      "position": [900, 500],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai_credential",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "create",
+        "modelId": "gpt-4",
+        "options": {
+          "temperature": 0.5,
+          "maxTokens": 500
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Sen bir hashtag uzmanısın. Blog konusuna uygun, popüler ve hedef kitleye ulaşacak hashtagler oluşturuyorsun.\n\nKurallar:\n- Her platform için optimize edilmiş hashtagler\n- LinkedIn: 3-5 profesyonel hashtag\n- Instagram: 15-20 popüler + niche hashtag\n- Twitter: 2-3 trending hashtag\n- Türkçe ve İngilizce karışık kullanabilirsin\n\nCevabını şu JSON formatında ver:\n{\n  \"linkedin\": [\"#hashtag1\", \"#hashtag2\"],\n  \"instagram\": [\"#hashtag1\", \"#hashtag2\", ...],\n  \"twitter\": [\"#hashtag1\", \"#hashtag2\"]\n}"
+            },
+            {
+              "role": "user",
+              "content": "Blog Başlığı: {{ $json.title }}\n\nKısa Özet: {{ $json.content.substring(0, 300) }}...\n\nBu blog için uygun hashtagler oluştur."
+            }
+          ]
+        }
+      },
+      "id": "generate-hashtags",
+      "name": "🏷️ AI: Generate Hashtags",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.3,
+      "position": [900, 700],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai_credential",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI responses and merge data\nconst items = [];\n\nfor (const item of $input.all()) {\n  try {\n    // Get social content from first AI call\n    const socialContentRaw = item.json.choices?.[0]?.message?.content || '{}';\n    const socialContent = JSON.parse(socialContentRaw);\n    \n    // Get hashtags from second AI call (from node connection)\n    const hashtagsNode = $node[\"generate-hashtags\"].json;\n    const hashtagsRaw = hashtagsNode?.choices?.[0]?.message?.content || '{\"linkedin\":[], \"instagram\":[], \"twitter\":[]}';\n    const hashtags = JSON.parse(hashtagsRaw);\n    \n    // Get original blog data\n    const originalData = $node[\"extract-blog-content\"].json;\n    \n    // Merge content with hashtags\n    const finalContent = {\n      linkedin: `${socialContent.linkedin}\\n\\n${hashtags.linkedin.join(' ')}${originalData.blog_url ? '\\n\\n🔗 ' + originalData.blog_url : ''}`,\n      instagram: `${socialContent.instagram}\\n\\n${hashtags.instagram.join(' ')}${originalData.blog_url ? '\\n\\n🔗 Link in bio!' : ''}`,\n      twitter: `${socialContent.twitter}\\n\\n${hashtags.twitter.join(' ')}${originalData.blog_url ? '\\n\\n' + originalData.blog_url : ''}`,\n      image_url: originalData.image_url || '',\n      blog_url: originalData.blog_url || '',\n      blog_title: originalData.title || '',\n      rowId: originalData.rowId || null\n    };\n    \n    items.push({ json: finalContent });\n  } catch (error) {\n    // Error handling\n    items.push({ \n      json: { \n        error: true, \n        message: error.message,\n        rawData: item.json \n      } \n    });\n  }\n}\n\nreturn items;"
+      },
+      "id": "merge-and-format",
+      "name": "🔄 Merge Content & Hashtags",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 600]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.error }}",
+              "value2": true,
+              "operation": "notEqual"
+            }
+          ]
+        }
+      },
+      "id": "check-errors",
+      "name": "❓ Check for Errors",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1300, 600]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "text": "={{ $json.linkedin }}",
+        "additionalFields": {
+          "visibility": "PUBLIC"
+        }
+      },
+      "id": "post-linkedin",
+      "name": "💼 Post to LinkedIn",
+      "type": "n8n-nodes-base.linkedIn",
+      "typeVersion": 1,
+      "position": [1500, 400],
+      "credentials": {
+        "linkedInOAuth2Api": {
+          "id": "linkedin_credential",
+          "name": "LinkedIn OAuth2"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "operation": "create",
+        "caption": "={{ $json.instagram }}",
+        "imageUrl": "={{ $json.image_url }}",
+        "additionalFields": {}
+      },
+      "id": "post-instagram",
+      "name": "📸 Post to Instagram",
+      "type": "n8n-nodes-base.instagram",
+      "typeVersion": 1,
+      "position": [1500, 600],
+      "credentials": {
+        "instagramOAuth2Api": {
+          "id": "instagram_credential",
+          "name": "Instagram OAuth2"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth1",
+        "text": "={{ $json.twitter }}",
+        "additionalFields": {}
+      },
+      "id": "post-twitter",
+      "name": "🐦 Post to Twitter/X",
+      "type": "n8n-nodes-base.twitter",
+      "typeVersion": 2,
+      "position": [1500, 800],
+      "credentials": {
+        "twitterOAuth1Api": {
+          "id": "twitter_credential",
+          "name": "Twitter OAuth1"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": "={{ $env.GOOGLE_SHEET_ID }}",
+        "range": "PostLog!A:H",
+        "options": {
+          "valueInputMode": "USER_ENTERED"
+        },
+        "columns": {
+          "mappings": [
+            {
+              "column": "Timestamp",
+              "value": "={{ $now.toISO() }}"
+            },
+            {
+              "column": "Blog Title",
+              "value": "={{ $json.blog_title }}"
+            },
+            {
+              "column": "Blog URL",
+              "value": "={{ $json.blog_url }}"
+            },
+            {
+              "column": "LinkedIn",
+              "value": "={{ $node['post-linkedin'].json.success ? '✅ Success' : '❌ Failed' }}"
+            },
+            {
+              "column": "Instagram",
+              "value": "={{ $node['post-instagram'].json.success ? '✅ Success' : '❌ Failed' }}"
+            },
+            {
+              "column": "Twitter",
+              "value": "={{ $node['post-twitter'].json.success ? '✅ Success' : '❌ Failed' }}"
+            },
+            {
+              "column": "Status",
+              "value": "completed"
+            },
+            {
+              "column": "Notes",
+              "value": "Auto-posted successfully"
+            }
+          ]
+        }
+      },
+      "id": "log-to-sheets",
+      "name": "📝 Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 3,
+      "position": [1700, 600],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google_sheets_credential",
+          "name": "Google Sheets"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "sheetId": "={{ $env.GOOGLE_SHEET_ID }}",
+        "range": "BlogQueue!A{{ $json.rowId }}:F{{ $json.rowId }}",
+        "options": {},
+        "columns": {
+          "mappings": [
+            {
+              "column": "Status",
+              "value": "completed"
+            },
+            {
+              "column": "Posted Date",
+              "value": "={{ $now.toFormat('yyyy-MM-dd HH:mm:ss') }}"
+            }
+          ]
+        }
+      },
+      "id": "update-queue-status",
+      "name": "✅ Update Queue Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 3,
+      "position": [1700, 800],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google_sheets_credential",
+          "name": "Google Sheets"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "channel": "={{ $env.SLACK_CHANNEL }}",
+        "text": "🎉 *Blog Sosyal Medyada Paylaşıldı!*\n\n📝 *Blog:* {{ $json.blog_title }}\n\n✅ *LinkedIn:* {{ $node['post-linkedin'].json.success ? 'Başarılı' : 'Başarısız' }}\n✅ *Instagram:* {{ $node['post-instagram'].json.success ? 'Başarılı' : 'Başarısız' }}\n✅ *Twitter:* {{ $node['post-twitter'].json.success ? 'Başarılı' : 'Başarısız' }}\n\n🔗 {{ $json.blog_url }}",
+        "otherOptions": {
+          "username": "n8n Social Bot",
+          "icon_emoji": ":rocket:"
+        }
+      },
+      "id": "slack-success",
+      "name": "🔔 Slack: Success Notification",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1900, 600],
+      "credentials": {
+        "slackApi": {
+          "id": "slack_credential",
+          "name": "Slack"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "channel": "={{ $env.SLACK_CHANNEL }}",
+        "text": "⚠️ *Blog Paylaşımında Hata!*\n\n📝 *Blog:* {{ $json.blog_title || 'Bilinmiyor' }}\n\n❌ *Hata:* {{ $json.message || 'Bilinmeyen hata' }}\n\n🔧 Lütfen workflow'u kontrol edin.",
+        "otherOptions": {
+          "username": "n8n Social Bot",
+          "icon_emoji": ":warning:"
+        }
+      },
+      "id": "slack-error",
+      "name": "🚨 Slack: Error Notification",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1500, 1000],
+      "credentials": {
+        "slackApi": {
+          "id": "slack_credential",
+          "name": "Slack"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, message: 'Blog successfully queued for social media posting', blog_title: $json.blog_title } }}"
+      },
+      "id": "webhook-response-success",
+      "name": "✅ Webhook Response: Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2100, 600]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 500,
+        "responseBody": "={{ { success: false, message: 'Error processing blog', error: $json.message } }}"
+      },
+      "id": "webhook-response-error",
+      "name": "❌ Webhook Response: Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1700, 1000]
+    }
+  ],
+  "connections": {
+    "📥 Webhook: New Blog Post": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Extract & Validate Blog Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏰ Schedule: Check New Blogs": {
+      "main": [
+        [
+          {
+            "node": "📊 Read Blog Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Read Blog Queue": {
+      "main": [
+        [
+          {
+            "node": "🔍 Filter Pending Blogs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Filter Pending Blogs": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Extract & Validate Blog Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Extract & Validate Blog Data": {
+      "main": [
+        [
+          {
+            "node": "🤖 AI: Generate Social Content",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🏷️ AI: Generate Hashtags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 AI: Generate Social Content": {
+      "main": [
+        [
+          {
+            "node": "🔄 Merge Content & Hashtags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🏷️ AI: Generate Hashtags": {
+      "main": [
+        [
+          {
+            "node": "🔄 Merge Content & Hashtags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔄 Merge Content & Hashtags": {
+      "main": [
+        [
+          {
+            "node": "❓ Check for Errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❓ Check for Errors": {
+      "main": [
+        [
+          {
+            "node": "💼 Post to LinkedIn",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📸 Post to Instagram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🐦 Post to Twitter/X",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "🚨 Slack: Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💼 Post to LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "📝 Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📸 Post to Instagram": {
+      "main": [
+        [
+          {
+            "node": "📝 Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🐦 Post to Twitter/X": {
+      "main": [
+        [
+          {
+            "node": "📝 Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Log to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "✅ Update Queue Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ Update Queue Status": {
+      "main": [
+        [
+          {
+            "node": "🔔 Slack: Success Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔔 Slack: Success Notification": {
+      "main": [
+        [
+          {
+            "node": "✅ Webhook Response: Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🚨 Slack: Error Notification": {
+      "main": [
+        [
+          {
+            "node": "❌ Webhook Response: Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Marketing",
+      "id": "marketing"
+    },
+    {
+      "name": "Social Media",
+      "id": "social-media"
+    },
+    {
+      "name": "AI-Powered",
+      "id": "ai"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2025-12-02T00:00:00.000Z",
+  "versionId": "1.0.0",
+  "active": false
+}
